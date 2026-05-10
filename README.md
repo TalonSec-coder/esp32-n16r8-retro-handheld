@@ -1,6 +1,6 @@
 # 🎮 Custom ESP32-S3 Retro-Go Handheld (GBA Edition)
 
-A custom DIY retro gaming handheld built around the **ESP32-S3 (8MB Octal PSRAM)** and the experimental **Retro-Go 1.4x-GBA** branch. 
+A custom DIY retro gaming handheld built around the **ESP32-S3 (16MB Flash, 8MB Octal PSRAM)** and the experimental **Retro-Go 1.4x-GBA** branch. 
 
 This repository contains heavily modified firmware designed to stabilize Game Boy Advance emulation on the ESP32-S3. It features custom C-code rewrites to fix broken BSON save states, fixes for Octal PSRAM bootloops, UI asset corrections, and specifically targets true **I2S Digital Audio (MAX98357A)** to prevent hardware brownouts commonly caused by raw PDM setups.
 
@@ -63,3 +63,6 @@ Place your game ROMs inside their respective folders (e.g., SD:/retro-go/roms/gb
 ⚠️ Known Limitations
 GBA Framerate: Emulating a 32-bit console on a microcontroller is pushing the absolute physical limits of the ESP32-S3. frameskip is permanently set to 1 in code to maintain a playable 30 FPS. Action games will look slightly choppy, but input and logic speed will be accurate.
 Filter Settings: For maximum performance, press the MENU button in-game and ensure "Video Filter" is set to OFF. Bilinear filtering costs too much CPU overhead on GBA titles.
+🙏 Credits & Acknowledgements
+Massive thanks to ducalex and the entire Retro-Go development team. This project is built entirely on their foundational framework and their highly experimental 1.4x-gba branch.
+Built using the Espressif IoT Development Framework (ESP-IDF).
