@@ -4,7 +4,7 @@ WORKDIR /app
 
 ADD . /app
 
-# RUN pip install -r requirements.txt
+# ESP-IDF 4.4 does not ship a host FAT image generator.\n# Install the standard Linux FAT tools used by the image packer.\nRUN apt-get update && apt-get install -y --no-install-recommends dosfstools mtools && rm -rf /var/lib/apt/lists/*
 
 # Apply patches
 RUN cd /opt/esp/idf && \
@@ -14,5 +14,4 @@ RUN cd /opt/esp/idf && \
 # Build
 SHELL ["/bin/bash", "-c"]
 RUN . /opt/esp/idf/export.sh && \
-	python rg_tool.py --target=odroid-go release && \
-	python rg_tool.py --target=mrgc-g32 release
+	python rg_tool.py --target=esp32-s3-st7735 --fatsize=10M release

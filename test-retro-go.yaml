@@ -1,0 +1,35 @@
+name: "Retro-Go ESP32-S3 full smoke test"
+version: 1
+author: "Jeka725"
+steps:
+  - delay: 5000ms
+  - set-control:
+      part-id: up
+      control: pressed
+      value: 1
+  - delay: 150ms
+  - set-control:
+      part-id: up
+      control: pressed
+      value: 0
+  - delay: 500ms
+  - set-control:
+      part-id: down
+      control: pressed
+      value: 1
+  - delay: 150ms
+  - set-control:
+      part-id: down
+      control: pressed
+      value: 0
+  - delay: 500ms
+  - set-control:
+      part-id: select
+      control: pressed
+      value: 1
+  - delay: 1200ms
+  - set-control:
+      part-id: select
+      control: pressed
+      value: 0
+  - delay: 1000ms

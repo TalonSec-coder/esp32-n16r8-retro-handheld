@@ -179,7 +179,7 @@ static bool buzzer_init(int device, int sampleRate)
     precompute_sine_wave(sampleRate);
 #endif
 
-    sampleQueue = xQueueCreate(cacheSamples*2, sizeof(int16_t*));
+    sampleQueue = xQueueCreate(cacheSamples*2, sizeof(int16_t));
     if (!sampleQueue) {
         RG_LOGE("could not create sampleQueue");
         return false;

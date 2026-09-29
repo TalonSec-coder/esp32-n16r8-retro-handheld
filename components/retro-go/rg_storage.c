@@ -39,9 +39,6 @@ static bool disk_mounted = false;
 #if defined(RG_STORAGE_SDSPI_HOST) || defined(RG_STORAGE_SDMMC_HOST)
 static sdmmc_card_t *card_handle = NULL;
 #endif
-#if defined(RG_STORAGE_FLASH_PARTITION)
-static wl_handle_t wl_handle = WL_INVALID_HANDLE;
-#endif
 
 #define CHECK_PATH(path)          \
     if (!(path && path[0]))       \
@@ -84,7 +81,7 @@ void rg_storage_init(void)
     };
 
     esp_err_t err = spi_bus_initialize(RG_STORAGE_SDSPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK) // check but do not abort, let esp_vfs_fat_sdspi_mount decide
+    if (err != ESP_OK)
         RG_LOGW("SPI bus init failed (0x%x)", err);
 
     sdmmc_host_t host_config = SDSPI_HOST_DEFAULT();
@@ -96,13 +93,11 @@ void rg_storage_init(void)
     slot_config.host_id = RG_STORAGE_SDSPI_HOST;
     slot_config.gpio_cs = RG_GPIO_SDSPI_CS;
 
-    // If we're using esp-idf >= 5.0 and the SPI bus is not shared, we must keep the SD card selected
-    // to work around slow accesses. (https://github.com/espressif/esp-idf/issues/10493)
-    #ifdef RG_STORAGE_SDSPI_HOLD_CS
+#ifdef RG_STORAGE_SDSPI_HOLD_CS
     gpio_set_direction(slot_config.gpio_cs, GPIO_MODE_OUTPUT);
     gpio_set_level(slot_config.gpio_cs, 0);
     slot_config.gpio_cs = GPIO_NUM_NC;
-    #endif
+#endif
 
     esp_vfs_fat_mount_config_t mount_config = {
         .format_if_mount_failed = false,
@@ -144,7 +139,7 @@ void rg_storage_init(void)
 
     sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
     slot_config.width = 1;
-#if SOC_SDMMC_USE_GPIO_MATRIX /* Only the esp32-s3 routes SDMMC through the GPIO matrix */
+#if SOC_SDMMC_USE_GPIO_MATRIX
     slot_config.clk = RG_GPIO_SDMMC_CLK;
     slot_config.cmd = RG_GPIO_SDMMC_CMD;
     slot_config.d0 = RG_GPIO_SDMMC_D0;
@@ -154,7 +149,6 @@ void rg_storage_init(void)
     slot_config.d2 = RG_GPIO_SDMMC_D2;
     slot_config.d3 = RG_GPIO_SDMMC_D3;
 #else
-    // d1 and d3 normally not used in width=1 but sdmmc_host_init_slot saves them, so just in case
     slot_config.d1 = slot_config.d3 = -1;
 #endif
 #endif
@@ -183,23 +177,25 @@ void rg_storage_init(void)
 #elif !defined(RG_STORAGE_FLASH_PARTITION)
 
     RG_LOGI("Using host (stdlib) for storage.");
-    // Maybe we should just check if RG_STORAGE_ROOT exists?
     error_code = 0;
 
 #endif
 
 #if defined(RG_STORAGE_FLASH_PARTITION)
 
-    if (error_code) // only if no previous storage was successfully mounted already
+    if (error_code)
     {
         RG_LOGI("Looking for an internal flash partition labelled '%s' to mount for storage...", RG_STORAGE_FLASH_PARTITION);
 
         esp_vfs_fat_mount_config_t mount_config = {
-            .format_if_mount_failed = true, // if mount failed, it's probably because it's a clean install so the partition hasn't been formatted yet
-            .max_files = 4, // must be initialized, otherwise it will be 0, which doesn't make sense, and will trigger an ESP_ERR_NO_MEM error
+            .format_if_mount_failed = false,
+            .max_files = 4,
+            .allocation_unit_size = 0,
         };
 
-        esp_err_t err = esp_vfs_fat_spiflash_mount(RG_STORAGE_ROOT, RG_STORAGE_FLASH_PARTITION, &mount_config, &wl_handle);
+        // ESP-IDF 4.4.8 provides the rawflash FAT mount as read-only.
+        // The bundled VFS image is immutable; saves/config should not be written here.
+        esp_err_t err = esp_vfs_fat_rawflash_mount(RG_STORAGE_ROOT, RG_STORAGE_FLASH_PARTITION, &mount_config);
         error_code = (int)err;
     }
 
@@ -211,6 +207,11 @@ void rg_storage_init(void)
         RG_LOGI("Storage mounted at %s.", RG_STORAGE_ROOT);
     else
         RG_LOGE("Storage mounting failed! err=0x%x", error_code);
+}
+
+bool rg_storage_ready(void)
+{
+    return disk_mounted;
 }
 
 void rg_storage_deinit(void)
@@ -226,17 +227,14 @@ void rg_storage_deinit(void)
     if (card_handle != NULL)
     {
         esp_err_t err = esp_vfs_fat_sdcard_unmount(RG_STORAGE_ROOT, card_handle);
-        card_handle = NULL; // NULL it regardless of success, nothing we can do on errors...
+        card_handle = NULL;
         error_code = (int)err;
     }
 #endif
 
 #if defined(RG_STORAGE_FLASH_PARTITION)
-    if (wl_handle != WL_INVALID_HANDLE)
     {
-        esp_err_t err = esp_vfs_fat_spiflash_unmount(RG_STORAGE_ROOT, wl_handle);
-        wl_handle = WL_INVALID_HANDLE;
-        error_code = (int)err;
+        esp_vfs_fat_rawflash_unmount(RG_STORAGE_ROOT, RG_STORAGE_FLASH_PARTITION);
     }
 #endif
 
@@ -248,16 +246,10 @@ void rg_storage_deinit(void)
     disk_mounted = false;
 }
 
-bool rg_storage_ready(void)
-{
-    return disk_mounted;
-}
-
 void rg_storage_commit(void)
 {
     if (!disk_mounted)
         return;
-    // flush buffers();
 }
 
 bool rg_storage_mkdir(const char *dir)
@@ -267,11 +259,9 @@ bool rg_storage_mkdir(const char *dir)
     if (mkdir(dir, 0777) == 0)
         return true;
 
-    // FIXME: Might want to stat to see if it's a dir
     if (errno == EEXIST)
         return true;
 
-    // Possibly missing some parents, try creating them
     char *temp = strdup(dir);
     for (char *p = temp + strlen(RG_STORAGE_ROOT) + 1; *p; p++)
     {
@@ -279,9 +269,7 @@ bool rg_storage_mkdir(const char *dir)
         {
             *p = 0;
             if (strlen(temp) > 0)
-            {
                 mkdir(temp, 0777);
-            }
             *p = '/';
             while (*(p + 1) == '/')
                 p++;
@@ -289,7 +277,6 @@ bool rg_storage_mkdir(const char *dir)
     }
     free(temp);
 
-    // Finally try again
     if (mkdir(dir, 0777) == 0)
         return true;
 
@@ -306,12 +293,9 @@ bool rg_storage_delete(const char *path)
 {
     CHECK_PATH(path);
 
-    // Try the fast way first
     if (remove(path) == 0 || rmdir(path) == 0)
         return true;
 
-    // If that fails, it's likely a non-empty directory and we go recursive
-    // (errno could confirm but it has proven unreliable across platforms...)
     if (rg_storage_scandir(path, delete_cb, NULL, 0))
         return rmdir(path) == 0;
 
@@ -359,7 +343,6 @@ bool rg_storage_scandir(const char *path, rg_scandir_cb_t *callback, void *arg, 
     if (!dir)
         return false;
 
-    // We allocate on heap in case we go recursive through rg_storage_delete
     rg_scandir_t *result = calloc(1, sizeof(rg_scandir_t));
     if (!result)
     {
@@ -374,10 +357,7 @@ bool rg_storage_scandir(const char *path, rg_scandir_cb_t *callback, void *arg, 
     while ((ent = readdir(dir)))
     {
         if (ent->d_name[0] == '.' && (!ent->d_name[1] || ent->d_name[1] == '.'))
-        {
-            // Skip self and parent
             continue;
-        }
 
         if (path_len + strlen(ent->d_name) >= RG_PATH_MAX)
         {
@@ -386,15 +366,14 @@ bool rg_storage_scandir(const char *path, rg_scandir_cb_t *callback, void *arg, 
         }
 
         strcpy((char *)result->basename, ent->d_name);
-    #if defined(DT_REG) && defined(DT_DIR)
+#if defined(DT_REG) && defined(DT_DIR)
         result->is_file = ent->d_type == DT_REG;
         result->is_dir = ent->d_type == DT_DIR;
-    #else
+#else
         result->is_file = 0;
         result->is_dir = 0;
-        // We're forced to stat() if the OS doesn't provide type via dirent
         flags |= RG_SCANDIR_STAT;
-    #endif
+#endif
 
         if ((flags & RG_SCANDIR_STAT) && stat(result->path, &statbuf) == 0)
         {
@@ -407,18 +386,14 @@ bool rg_storage_scandir(const char *path, rg_scandir_cb_t *callback, void *arg, 
         if ((result->is_dir && types != RG_SCANDIR_FILES) || (result->is_file && types != RG_SCANDIR_DIRS))
         {
             int ret = (callback)(result, arg);
-
             if (ret == RG_SCANDIR_STOP)
                 break;
-
             if (ret == RG_SCANDIR_SKIP)
                 continue;
         }
 
         if ((flags & RG_SCANDIR_RECURSIVE) && result->is_dir)
-        {
             rg_storage_scandir(result->path, callback, arg, flags);
-        }
     }
 
     closedir(dir);
@@ -429,17 +404,12 @@ bool rg_storage_scandir(const char *path, rg_scandir_cb_t *callback, void *arg, 
 
 int64_t rg_storage_get_free_space(const char *path)
 {
-    // Here we should translate the provided VFS path to the matching filesystem driver and drive
-    // But we don't. Instead we just assume it's drive 0 of the fatfs driver. Yay laziness.
 #ifdef ESP_PLATFORM
     DWORD nclst;
     FATFS *fatfs;
     if (f_getfree("0:", &nclst, &fatfs) == FR_OK)
-    {
         return (int64_t)nclst * fatfs->csize * fatfs->ssize;
-    }
 #endif
-
     return -1;
 }
 
@@ -496,11 +466,8 @@ bool rg_storage_read_file(const char *path, void **data_out, size_t *data_len, u
 
     fclose(fp);
 
-    // Wipe the extra allocated space, if any
     if (output_buffer_alloc_size > output_buffer_size)
-    {
         memset(output_buffer + output_buffer_size, 0, output_buffer_alloc_size - output_buffer_size);
-    }
 
     *data_out = output_buffer;
     *data_len = output_buffer_size;
@@ -512,7 +479,6 @@ bool rg_storage_write_file(const char *path, const void *data_ptr, size_t data_l
     RG_ASSERT_ARG(data_ptr || !data_len);
     CHECK_PATH(path);
 
-    // TODO: If atomic is true we should write to a temp file and only replace the target on success
     FILE *fp = fopen(path, "wb");
     if (!fp)
     {
@@ -533,8 +499,6 @@ bool rg_storage_write_file(const char *path, const void *data_ptr, size_t data_l
 
 /**
  * This is a minimal UNZIP implementation that utilizes only the miniz primitives found in ESP32's ROM.
- * I think that we should use miniz' ZIP API instead and bundle miniz with retro-go. But first I need
- * to do some testing to determine if the increased executable size is acceptable...
  */
 #if RG_ZIP_SUPPORT
 
@@ -559,8 +523,6 @@ typedef struct __attribute__((packed))
     uint16_t filename_size;
     uint16_t extra_field_size;
     uint8_t filename[226];
-    // uint8_t extra_field[];
-    // uint8_t compressed_data[];
 } zip_header_t;
 
 bool rg_storage_unzip_file(const char *zip_path, const char *filter, void **data_out, size_t *data_len, uint32_t flags)
@@ -578,8 +540,6 @@ bool rg_storage_unzip_file(const char *zip_path, const char *filter, void **data
         return false;
     }
 
-    // Very inefficient, we should read a block at a time and search it for a header. But I'm lazy.
-    // Thankfully the header is usually found on the very first read :)
     for (header_pos = 0; !feof(fp) && header_pos < 0x10000; ++header_pos)
     {
         fseek(fp, header_pos, SEEK_SET);
@@ -595,7 +555,6 @@ bool rg_storage_unzip_file(const char *zip_path, const char *filter, void **data
         return false;
     }
 
-    // Zero terminate or truncate filename just in case
     header.filename[RG_MIN(header.filename_size, 225)] = 0;
 
     RG_LOGI("Found file at %d, name: '%s', size: %d", header_pos, header.filename, (int)header.uncompressed_size);
@@ -648,8 +607,7 @@ bool rg_storage_unzip_file(const char *zip_path, const char *filter, void **data
         output_buffer_pos += output_size;
     } while (status == TINFL_STATUS_NEEDS_MORE_INPUT);
 
-    // With user-provided buffer we might not reach TINFL_STATUS_DONE, but it doesn't mean we've failed
-    if (status < TINFL_STATUS_DONE || output_buffer_pos != output_buffer_size) // (status != TINFL_STATUS_DONE)
+    if (status < TINFL_STATUS_DONE || output_buffer_pos != output_buffer_size)
     {
         RG_LOGE("Decompression failed (%d): %s", (int)status, zip_path);
         goto _fail;

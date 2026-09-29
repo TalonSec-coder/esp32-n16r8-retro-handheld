@@ -28,6 +28,8 @@
 #include "targets/crokpocket/config.h"
 #elif defined(RG_TARGET_ESP32_P4)
 #include "targets/esp32-p4/config.h"
+#elif defined(RG_TARGET_ESP32_S3_ST7735)
+#include "targets/esp32-s3-st7735/config.h"
 #elif defined(RG_TARGET_ESP32_S3_DEVKIT)
 #include "targets/esp32-s3-devkit/config.h"
 #else

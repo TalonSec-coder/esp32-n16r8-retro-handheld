@@ -1,7 +1,7 @@
 name: ci
 
-on: 
-  workflow_dispatch:      # Start a workflow
+on:
+  workflow_dispatch:
   push:
 
 jobs:
@@ -24,12 +24,18 @@ jobs:
         cache-to: type=gha,mode=max
         load: true
 
-    - name: Extract binaries from docker image
+    - name: Extract firmware images from docker image
       run: |
-        docker run --rm -v $(pwd)/build:/build retro-go:latest sh -c "cp /app/*.fw /build"
+        mkdir -p build
+        docker run --rm -v $(pwd)/build:/build retro-go:latest sh -c 'set -e; cp /app/*.fw /build/ 2>/dev/null || true; cp /app/*.img /build/ 2>/dev/null || true; ls -lh /build'
+        IMG="$(find build -maxdepth 1 -name '*.img' -type f | head -n1)"
+        test -n "$IMG"
+        test "$(stat -c%s "$IMG")" -eq 16384000
+        grep -a -q "Sonic The Hedgehog (USA, Europe).md" "$IMG"
+        cp "$IMG" build/retro-go.img
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: binaries
-        path: build/*.fw
+        path: build/*

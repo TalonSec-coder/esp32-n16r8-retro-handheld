@@ -1,6 +1,12 @@
 #include "rg_system.h"
 #include "rg_display.h"
 
+#ifndef RG_DISPLAY_DEFAULT_SCALING
+#define RG_DISPLAY_DEFAULT_SCALING RG_DISPLAY_SCALING_FIT
+#endif
+#ifndef RG_DISPLAY_DEFAULT_FILTER
+#define RG_DISPLAY_DEFAULT_FILTER RG_DISPLAY_FILTER_BOTH
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,6 +45,8 @@ static inline void lcd_send_buffer(uint16_t *buffer, size_t length);
 
 #if RG_SCREEN_DRIVER == 0 || RG_SCREEN_DRIVER == 1 /* ILI9341/ST7789 */
 #include "drivers/display/ili9341.h"
+#elif RG_SCREEN_DRIVER == 2 /* ST7735S 128x160 */
+#include "drivers/display/st7735.h"
 #elif RG_SCREEN_DRIVER == 99
 #include "drivers/display/sdl2.h"
 #else
@@ -404,7 +412,7 @@ display_filter_t rg_display_get_filter(void)
 void rg_display_set_rotation(display_rotation_t rotation)
 {
     config.rotation = RG_MIN(RG_MAX(0, rotation), RG_DISPLAY_ROTATION_COUNT - 1);
-    rg_settings_set_number(NS_APP, SETTING_SCALING, config.rotation);
+    rg_settings_set_number(NS_APP, SETTING_ROTATION, config.rotation);
     display.changed = true;
 }
 
@@ -587,8 +595,8 @@ void rg_display_init(void)
     // TO DO: We probably should call the setters to ensure valid values...
     config = (rg_display_config_t){
         .backlight = rg_settings_get_number(NS_GLOBAL, SETTING_BACKLIGHT, 80),
-        .scaling = rg_settings_get_number(NS_APP, SETTING_SCALING, RG_DISPLAY_SCALING_FIT),
-        .filter = rg_settings_get_number(NS_APP, SETTING_FILTER, RG_DISPLAY_FILTER_BOTH),
+        .scaling = rg_settings_get_number(NS_APP, SETTING_SCALING, RG_DISPLAY_DEFAULT_SCALING),
+        .filter = rg_settings_get_number(NS_APP, SETTING_FILTER, RG_DISPLAY_DEFAULT_FILTER),
         .rotation = rg_settings_get_number(NS_APP, SETTING_ROTATION, RG_DISPLAY_ROTATION_AUTO),
         .border_file = rg_settings_get_string(NS_APP, SETTING_BORDER, NULL),
         .custom_zoom = rg_settings_get_number(NS_APP, SETTING_CUSTOM_ZOOM, 1.0),

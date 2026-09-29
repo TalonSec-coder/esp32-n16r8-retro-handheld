@@ -885,6 +885,8 @@ intptr_t rg_gui_dialog(const char *title, const rg_gui_option_t *options_const, 
     rg_gui_event_t event = RG_DIALOG_VOID;
     uint32_t joystick = 0, joystick_old;
     uint64_t joystick_last = 0;
+    uint64_t select_hold_start = 0;
+    bool select_hold_cancelled = false;
 
     while (event != RG_DIALOG_SELECT && event != RG_DIALOG_CANCEL)
     {
@@ -893,7 +895,24 @@ intptr_t rg_gui_dialog(const char *title, const rg_gui_option_t *options_const, 
         joystick = rg_input_read_gamepad();
         event = RG_DIALOG_VOID;
 
-        if (joystick ^ joystick_old)
+        const int64_t now = rg_system_timer();
+        const bool a_down = (joystick & RG_KEY_A) != 0;
+        const bool a_was_down = (joystick_old & RG_KEY_A) != 0;
+        if (a_down && !a_was_down)
+        {
+            select_hold_start = now;
+            select_hold_cancelled = false;
+        }
+        else if (a_down && select_hold_start && !select_hold_cancelled &&
+                 (now - select_hold_start) >= 1000000)
+        {
+            // SELECT is physically mapped to A on this target.
+            // A 1-second hold is Back/Cancel, including modal dialogs.
+            select_hold_cancelled = true;
+            event = RG_DIALOG_CANCEL;
+        }
+
+        if (joystick ^ joystick_old && !select_hold_cancelled)
         {
             bool active_selection = options_count && options[sel].flags == RG_DIALOG_FLAG_NORMAL;
             rg_gui_callback_t callback = active_selection ? options[sel].update_cb : NULL;
@@ -978,7 +997,8 @@ intptr_t rg_gui_dialog(const char *title, const rg_gui_option_t *options_const, 
         rg_system_tick(0);
     }
 
-    rg_input_wait_for_key(joystick, false, 1000);
+    // Consume the SELECT press that opened/cancelled the dialog.
+    rg_input_wait_for_key(RG_KEY_A, false, 1000);
     rg_display_force_redraw();
     free(text_buffer);
 

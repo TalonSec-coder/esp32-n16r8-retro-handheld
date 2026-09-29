@@ -199,6 +199,9 @@ static void retro_loop(void)
     int change_tab = 0;
     int browse_last = -1;
     bool redraw_pending = true;
+    int64_t select_hold_start = 0;
+    bool select_hold_back = false;
+    int64_t select_action_block_until = 0;
 
     gui_init(app->isColdBoot);
     applications_init();
@@ -316,8 +319,23 @@ static void retro_loop(void)
                 redraw_pending = true;
             }
             else if (joystick == RG_KEY_A) {
-                gui_event(TAB_ACTION, tab);
-                redraw_pending = true;
+                // Short press = select/confirm; hold SELECT/A for 2 seconds = back.
+                int64_t now = rg_system_timer();
+                if (!(prev_joystick & RG_KEY_A)) {
+                    select_hold_start = now;
+                    select_hold_back = false;
+                } else if (!select_hold_back && select_hold_start &&
+                           (now - select_hold_start) >= 2000000) {
+                    select_hold_back = true;
+                    if (tab->navpath)
+                        gui_event(TAB_BACK, tab);
+                    else
+                        gui.browse = false;
+                    // After using SELECT as the 2-second Back button, ignore SELECT
+                    // actions for 500 ms so the same press cannot immediately confirm.
+                    select_action_block_until = now + 500000;
+                    redraw_pending = true;
+                }
             }
             else if (joystick == RG_KEY_B) {
                 if (tab->navpath)
@@ -338,6 +356,18 @@ static void retro_loop(void)
             else if (joystick == RG_KEY_A) {
                 gui.browse = true;
             }
+        }
+
+        if (!(gui.joystick & RG_KEY_A) && (prev_joystick & RG_KEY_A) &&
+            gui.browse && !select_hold_back) {
+            if (rg_system_timer() >= select_action_block_until) {
+                gui_event(TAB_ACTION, tab);
+                redraw_pending = true;
+            }
+        }
+        if (!(gui.joystick & RG_KEY_A)) {
+            select_hold_start = 0;
+            select_hold_back = false;
         }
 
         if (redraw_pending)
@@ -453,13 +483,22 @@ void app_main(void)
     if (!rg_storage_ready())
     {
         rg_display_clear(C_SKY_BLUE);
-        rg_gui_alert(_("SD Card Error"), _("Storage mount failed.\nMake sure the card is FAT32."));
+        rg_gui_alert(_("Internal Flash Error"), _("Storage mount failed.\nThe internal FAT storage could not be mounted."));
     }
     else
     {
         rg_storage_mkdir(RG_BASE_PATH_CACHE);
         rg_storage_mkdir(RG_BASE_PATH_CONFIG);
         try_migrate();
+
+        // Emergency standalone Sonic build: boot directly into the bundled
+        // Mega Drive ROM so the handheld is immediately playable without the launcher menu.
+        // The image builder always places this ROM at this exact Retro-Go path.
+        const char *sonic_path = RG_STORAGE_ROOT "/retro-go/roms/md/Sonic The Hedgehog (USA, Europe).md";
+        if (rg_storage_exists(sonic_path))
+        {
+            rg_system_switch_app("gwenesis", "md", sonic_path, -1, 0);
+        }
     }
 
 #ifdef ESP_PLATFORM
